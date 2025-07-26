@@ -1,0 +1,93 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Card Battle Game - Next.js App with Socket.IO deployed on AWS App Runner'
+
+Parameters:
+  GitHubRepository:
+    Type: String
+    Description: GitHub repository URL (e.g., https://github.com/username/card-battle)
+    Default: https://github.com/ileeds/card-battle
+  
+  GitHubBranch:
+    Type: String
+    Description: GitHub branch to deploy
+    Default: main
+  
+  GitHubConnectionArn:
+    Type: String
+    Description: ARN of the GitHub connection created in App Runner console
+    Default: arn:aws:apprunner:us-east-1:895339510044:connection/card-battle-github-connection/91b08f1089bc4fcbbd27f5eb5b2cf7df
+
+Resources:
+  # IAM Role for App Runner
+  AppRunnerInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: tasks.apprunner.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSAppRunnerServicePolicyForECRAccess
+
+  # App Runner Auto Scaling Configuration
+  AppRunnerAutoScalingConfig:
+    Type: AWS::AppRunner::AutoScalingConfiguration
+    Properties:
+      AutoScalingConfigurationName: !Sub "${AWS::StackName}-autoscaling"
+      MaxConcurrency: 10
+      MaxSize: 2
+      MinSize: 1
+
+  # App Runner Service
+  AppRunnerService:
+    Type: AWS::AppRunner::Service
+    Properties:
+      ServiceName: !Sub "${AWS::StackName}-card-battle"
+      SourceConfiguration:
+        AutoDeploymentsEnabled: true
+        CodeRepository:
+          RepositoryUrl: !Ref GitHubRepository
+          SourceCodeVersion:
+            Type: BRANCH
+            Value: !Ref GitHubBranch
+          CodeConfiguration:
+            ConfigurationSource: REPOSITORY
+            CodeConfigurationValues:
+              Runtime: NODEJS_22
+              BuildCommand: npm install && npm run build
+              StartCommand: npm start
+              RuntimeEnvironmentVariables:
+                - Name: NODE_ENV
+                  Value: production
+                - Name: PORT
+                  Value: "8080"
+        AuthenticationConfiguration:
+          ConnectionArn: !Ref GitHubConnectionArn
+      AutoScalingConfigurationArn: !Ref AppRunnerAutoScalingConfig
+      InstanceConfiguration:
+        Cpu: 0.25 vCPU
+        Memory: 0.5 GB
+        InstanceRoleArn: !GetAtt AppRunnerInstanceRole.Arn
+      HealthCheckConfiguration:
+        Protocol: HTTP
+        Path: /
+        Interval: 20
+        Timeout: 5
+        HealthyThreshold: 2
+        UnhealthyThreshold: 5
+
+Outputs:
+  AppRunnerServiceUrl:
+    Description: URL of the App Runner service
+    Value: !Sub "https://${AppRunnerService.ServiceUrl}"
+    Export:
+      Name: !Sub "${AWS::StackName}-ServiceUrl"
+  
+  AppRunnerServiceArn:
+    Description: ARN of the App Runner service
+    Value: !Ref AppRunnerService
+    Export:
+      Name: !Sub "${AWS::StackName}-ServiceArn"
